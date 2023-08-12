@@ -70,6 +70,11 @@ First clone the repository.
 
 Then, download one of the Whisper models converted in [ggml format](models). For example:
 
+Install ffmpeg
+```bash
+sudo apt install ffmpeg
+```
+
 ```bash
 bash ./models/download-ggml-model.sh base.en
 ```

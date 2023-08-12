@@ -3,12 +3,15 @@
 #include "whisper.h"
 
 #include <cmath>
+#include <iostream>
 #include <fstream>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
 #include <cstring>
+#include <random>
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -36,6 +39,24 @@ std::string to_timestamp(int64_t t, bool comma = false) {
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d%s%03d", (int) hr, (int) min, (int) sec, comma ? "," : ".", (int) msec);
 
     return std::string(buf);
+}
+
+std::string generateRandomFileName() {
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dis(0, 9);
+  std::string fileName = "";
+  for (int i = 0; i < 10; i++) {
+    fileName += std::to_string(dis(gen));
+  }
+  return fileName;
+}
+
+std::string convertToWav16bit(const std::string& inputFilepath) {
+  std::string outputFile = generateRandomFileName() + ".wav";
+  std::string cmd = "ffmpeg -i " + inputFilepath + " -ar 16000 -ac 1 -c:a pcm_s16le " + outputFile  + " > /dev/null 2>&1";
+  system(cmd.c_str());
+  return outputFile;
 }
 
 int timestamp_to_sample(int64_t t, int n_samples) {
@@ -105,6 +126,7 @@ struct whisper_params {
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
 
 bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
+    std::string inputFilePath;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
@@ -157,7 +179,14 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-dl"   || arg == "--detect-language") { params.detect_language = true; }
         else if (                  arg == "--prompt")          { params.prompt          = argv[++i]; }
         else if (arg == "-m"    || arg == "--model")           { params.model           = argv[++i]; }
-        else if (arg == "-f"    || arg == "--file")            { params.fname_inp.emplace_back(argv[++i]); }
+        else if (arg == "-f" || arg == "--file") {
+            inputFilePath = argv[++i];
+            std::string outputFilePath = convertToWav16bit(inputFilePath);
+            if (!outputFilePath.empty()) {
+                params.fname_inp.emplace_back(outputFilePath);
+            }
+            std::cout<<"Input Audio File converted into 16-bit WAV files: " << outputFilePath<<"\n\n";
+        } 
         else if (arg == "-oved" || arg == "--ov-e-device")     { params.openvino_encode_device = argv[++i]; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
