@@ -299,7 +299,7 @@ speed-up - more than x3 faster compared with CPU-only execution. Here are the in
 - Run the examples as usual. For example:
 
   ```bash
-  ./main -m models/ggml-base.en.bin -f samples/jfk.wav
+  ./main -m models/ggml-base.en.bin -f samples/jfk.wav output_file_path.wav
 
   ...
 

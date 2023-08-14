@@ -52,11 +52,17 @@ std::string generateRandomFileName() {
   return fileName;
 }
 
-std::string convertToWav16bit(const std::string& inputFilepath) {
-  std::string outputFile = generateRandomFileName() + ".wav";
-  std::string cmd = "ffmpeg -i " + inputFilepath + " -ar 16000 -ac 1 -c:a pcm_s16le " + outputFile  + " > /dev/null 2>&1";
-  system(cmd.c_str());
-  return outputFile;
+std::string convertToWav16bit(const std::string& inputFilepath, const std::string& outpath) {
+    // size_t lastSlashPos = inputFilepath.rfind("/");
+    // std::string inputDir = inputFilepath.substr(0, lastSlashPos + 1);
+    // std::string inputFilename = inputFilepath.substr(lastSlashPos + 1);
+    
+    // std::string outputFile = inputDir + generateRandomFileName() + ".wav";
+    
+    std::string cmd = "ffmpeg -i " + inputFilepath + " -ar 16000 -ac 1 -c:a pcm_s16le " + outpath + " > /dev/null 2>&1";
+    system(cmd.c_str());
+    
+    return outpath;
 }
 
 int timestamp_to_sample(int64_t t, int n_samples) {
@@ -128,6 +134,7 @@ void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
 
 bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
     std::string inputFilePath;
+    std::string outpath;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
 
@@ -182,7 +189,8 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
         else if (arg == "-m"    || arg == "--model")           { params.model           = argv[++i]; }
         else if (arg == "-f" || arg == "--file") {
             inputFilePath = argv[++i];
-            std::string outputFilePath = convertToWav16bit(inputFilePath);
+            outpath = argv[++i];
+            std::string outputFilePath = convertToWav16bit(inputFilePath , outpath);
             if (!outputFilePath.empty()) {
                 params.fname_inp.emplace_back(outputFilePath);
             }
