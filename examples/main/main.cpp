@@ -97,7 +97,7 @@ struct whisper_params {
     bool tinydiarize     = false;
     bool split_on_word   = false;
     bool no_fallback     = false;
-    bool output_txt      = false;
+    bool output_txt      = true;
     bool output_vtt      = false;
     bool output_srt      = false;
     bool output_wts      = false;
@@ -111,6 +111,7 @@ struct whisper_params {
 
     std::string language  = "en";
     std::string prompt;
+    std::string output_file = "output.txt";
     std::string font_path = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf";
     std::string model     = "models/ggml-base.en.bin";
 
@@ -186,7 +187,8 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
                 params.fname_inp.emplace_back(outputFilePath);
             }
             std::cout<<"Input Audio File converted into 16-bit WAV files: " << outputFilePath<<"\n\n";
-        } 
+        }
+        else if (arg == "-ot" || arg == "--output-text")       { params.output_file     = argv[++i]; }
         else if (arg == "-oved" || arg == "--ov-e-device")     { params.openvino_encode_device = argv[++i]; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
@@ -283,6 +285,7 @@ std::string estimate_diarization_speaker(std::vector<std::vector<float>> pcmf32s
 
     return speaker;
 }
+
 void whisper_print_progress_callback(struct whisper_context * ctx, struct whisper_state * /*state*/, int progress, void * user_data) {
     int progress_step = ((whisper_print_user_data *) user_data)->params->progress_step;
     int * progress_prev  = &(((whisper_print_user_data *) user_data)->progress_prev);
@@ -972,8 +975,7 @@ int main(int argc, char ** argv) {
 
             // output to text file
             if (params.output_txt) {
-                const auto fname_txt = fname_out + ".txt";
-                output_txt(ctx, fname_txt.c_str(), params, pcmf32s);
+                output_txt(ctx, params.output_file.c_str(), params, pcmf32s);
             }
 
             // output to VTT file
