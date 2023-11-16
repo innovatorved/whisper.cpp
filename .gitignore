@@ -57,3 +57,4 @@ benchmark_results.csv
 *.wav
 *.mp3
 *.txt
+*.vtt
