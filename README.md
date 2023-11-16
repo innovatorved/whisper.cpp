@@ -93,6 +93,9 @@ make
 
 # transcribe an audio file
 ./main -f samples/jfk.wav
+
+# modified cmd
+./main -m models/ggml-tiny.en.bin -f Rev.mp3 out.wav -nt --output-text out1.txt
 ```
 
 ---

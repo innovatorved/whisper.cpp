@@ -53,3 +53,7 @@ bindings/java/.idea/
 .idea/
 
 benchmark_results.csv
+
+*.wav
+*.mp3
+*.txt
