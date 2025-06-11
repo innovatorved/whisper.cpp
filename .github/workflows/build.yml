@@ -761,14 +761,15 @@ jobs:
   windows-cublas:
     if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' ||
             github.event.inputs.run_type == 'full-ci' }}
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
+      fail-fast: false
       matrix:
         build: [Release]
         arch: [x64]
         cublas: [ON]
         sdl2: [ON]
-        cuda-toolkit: [12.2.0, 11.8.0]
+        cuda-toolkit: [12.4.0, 11.8.0]
         include:
           - arch: x64
             sdl2: ON
@@ -836,7 +837,7 @@ jobs:
           xcopy "$CUDA_TOOLKIT_DIR\visual_studio_integration-windows-x86_64-${VS_VER}-archive\*" "$CUDA_TOOLKIT_DIR" /E /I /H /Y
 
           # Visual Studio integration
-          xcopy "$CUDA_TOOLKIT_DIR\visual_studio_integration-windows-x86_64-${VS_VER}-archive\visual_studio_integration\MSBuildExtensions\*" "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Microsoft\VC\v160\BuildCustomizations" /E /I /H /Y
+          xcopy "$CUDA_TOOLKIT_DIR\visual_studio_integration-windows-x86_64-${VS_VER}-archive\visual_studio_integration\MSBuildExtensions\*" "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations" /E /I /H /Y
 
           # Set environment variables
           echo "$CUDA_TOOLKIT_DIR\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -844,23 +845,23 @@ jobs:
           echo "CUDA_PATH=$CUDA_TOOLKIT_DIR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           echo "CUDA_PATH_V11_8=$CUDA_TOOLKIT_DIR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         
-      - name: Install Cuda Toolkit 12.2.0
-        if: ${{ matrix.cuda-toolkit == '12.2.0' }}
+      - name: Install Cuda Toolkit 12.4.0
+        if: ${{ matrix.cuda-toolkit == '12.4.0' }}
         run: |
           $CUDA_VERSION = ${{ matrix.cuda-toolkit }}
           $CUDA_TOOLKIT_DIR = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$CUDA_VERSION"
           $CUDA_DOWNLOAD = "https://developer.download.nvidia.com/compute/cuda/redist"
 
           # Components versions
-          $CUDART_VER   = "12.2.140"
-          $NVCC_VER     = "12.2.140"
-          $NVRTC_VER    = "12.2.140"
-          $CUBLAS_VER   = "12.2.5.6"
-          $NVTX_VER     = "12.2.140"
-          $PROFILER_VER = "12.2.140"
-          $VS_VER       = "12.2.140"
-          $NVPROF_VER   = "12.2.142"
-          $CCCL_VER     = "12.2.140"
+          $CUDART_VER   = "12.4.127"
+          $NVCC_VER     = "12.4.131"
+          $NVRTC_VER    = "12.4.127"
+          $CUBLAS_VER   = "12.4.5.8"
+          $NVTX_VER     = "12.4.127"
+          $PROFILER_VER = "12.4.127"
+          $VS_VER       = "12.4.127"
+          $NVPROF_VER   = "12.4.128"
+          $CCCL_VER     = "12.4.127"
 
           # Create the directory where the CUDA Toolkit will be installed
           mkdir -p $CUDA_TOOLKIT_DIR
@@ -894,7 +895,7 @@ jobs:
           xcopy "$CUDA_TOOLKIT_DIR\visual_studio_integration-windows-x86_64-${VS_VER}-archive\*" "$CUDA_TOOLKIT_DIR" /E /I /H /Y
 
           # Visual Studio integration
-          xcopy "$CUDA_TOOLKIT_DIR\visual_studio_integration-windows-x86_64-${VS_VER}-archive\visual_studio_integration\MSBuildExtensions\*" "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Microsoft\VC\v160\BuildCustomizations" /E /I /H /Y
+          xcopy "$CUDA_TOOLKIT_DIR\visual_studio_integration-windows-x86_64-${VS_VER}-archive\visual_studio_integration\MSBuildExtensions\*" "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations" /E /I /H /Y
 
           # Set environment variables
           echo "$CUDA_TOOLKIT_DIR\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -922,14 +923,21 @@ jobs:
       - name: Build Project
         shell: cmd
         run: |
-          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
           cmake --version
           where cmake
+          if "${{ matrix.cuda-toolkit }}" == "11.8.0" (
+            set CUDA_FLAGS=-allow-unsupported-compiler -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR
+          ) else (
+            set CUDA_FLAGS=
+          )
           cmake -S . -B build -G "Ninja Multi-Config" ^
             -DCMAKE_BUILD_TYPE=${{ matrix.build }} ^
             -DGGML_CUDA=${{ matrix.cublas }} ^
             -DWHISPER_SDL2=${{ matrix.sdl2 }} ^
-            -DSDL2_DIR="%SDL2_DIR%"
+            -DSDL2_DIR="%SDL2_DIR%" ^
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 ^
+            -DCMAKE_CUDA_FLAGS="%CUDA_FLAGS%"
           set /A NINJA_JOBS=%NUMBER_OF_PROCESSORS%-1
           cmake --build build --config ${{ matrix.build }} -j %NUMBER_OF_PROCESSORS%
 
