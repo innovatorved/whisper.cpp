@@ -8,8 +8,9 @@ set(WHISPER_LIB_DIR ${CMAKE_SOURCE_DIR}/../../../../../../../)
 set(SOURCE_FILES
     ${WHISPER_LIB_DIR}/ggml/src/ggml.c
     ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/ggml-cpu.c
-    ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/repack.cpp
     ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/traits.cpp
+    ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/arch/arm/quants.c
+    ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/arch/arm/repack.cpp
     ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/quants.c
     ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/ggml-cpu.cpp
     ${WHISPER_LIB_DIR}/ggml/src/ggml-cpu/unary-ops.cpp
