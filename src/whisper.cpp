@@ -6620,8 +6620,9 @@ static bool whisper_vad(
 
     whisper_vad_segments * vad_segments = whisper_vad_segments_from_samples(vctx, vad_params, samples, n_samples);
 
-    if(!vad_segments)
+    if (!vad_segments) {
         return false;
+    }
 
     if (vad_segments->data.size() > 0) {
         state->has_vad_segments = true;
