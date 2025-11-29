@@ -31,6 +31,82 @@ static void replace_all(std::string & s, const std::string & search, const std::
     }
 }
 
+// helper function to check if file is a video file based on extension
+static bool is_video_file(const std::string & fname) {
+    std::string ext = "";
+    size_t pos = fname.rfind('.');
+    if (pos != std::string::npos) {
+        ext = fname.substr(pos + 1);
+        // convert to lowercase
+        for (auto & c : ext) {
+            c = tolower(c);
+        }
+    }
+    // Common video extensions
+    return ext == "mp4" || ext == "mkv" || ext == "avi" || ext == "mov" || 
+           ext == "webm" || ext == "flv" || ext == "wmv" || ext == "m4v" ||
+           ext == "mpeg" || ext == "mpg" || ext == "3gp";
+}
+
+// helper function to convert video to audio using ffmpeg
+// returns empty string on failure, or path to temporary wav file on success
+static std::string convert_video_to_audio(const std::string & video_path) {
+    // Create a temporary file path for the audio output
+    // Use a simpler temp path to avoid issues with special characters
+    std::string temp_audio_path = video_path + ".whisper_temp.wav";
+    
+    // Build ffmpeg command to extract audio
+    // -y: overwrite output file without asking
+    // -i: input file
+    // -vn: disable video (audio only)
+    // -ar 16000: resample to 16kHz (whisper requirement)
+    // -ac 1: convert to mono
+    // -c:a pcm_s16le: output as 16-bit PCM WAV
+    std::string cmd = "ffmpeg -y -i \"" + video_path + "\" -vn -ar 16000 -ac 1 -c:a pcm_s16le \"" + temp_audio_path + "\"";
+    
+#ifdef _WIN32
+    cmd += " 2>nul";
+#else
+    cmd += " 2>&1";
+#endif
+    
+    fprintf(stderr, "%s: converting video to audio using ffmpeg...\n", __func__);
+    fprintf(stderr, "%s: running: %s\n", __func__, cmd.c_str());
+    
+    int ret = system(cmd.c_str());
+    if (ret != 0) {
+        fprintf(stderr, "%s: ffmpeg conversion failed (exit code: %d)\n", __func__, ret);
+        fprintf(stderr, "%s: make sure ffmpeg is installed and available in PATH\n", __func__);
+        return "";
+    }
+    
+    // Verify the output file exists and has content
+    std::ifstream check(temp_audio_path, std::ios::binary | std::ios::ate);
+    if (!check.good()) {
+        fprintf(stderr, "%s: ffmpeg conversion succeeded but output file not found: %s\n", __func__, temp_audio_path.c_str());
+        return "";
+    }
+    
+    std::streamsize file_size = check.tellg();
+    check.close();
+    
+    if (file_size < 44) { // WAV header is at least 44 bytes
+        fprintf(stderr, "%s: ffmpeg conversion produced invalid/empty WAV file (size: %lld bytes)\n", __func__, (long long)file_size);
+        std::remove(temp_audio_path.c_str());
+        return "";
+    }
+    
+    fprintf(stderr, "%s: video converted to audio: %s (%.2f MB)\n", __func__, temp_audio_path.c_str(), file_size / (1024.0 * 1024.0));
+    return temp_audio_path;
+}
+
+// helper function to clean up temporary audio files
+static void cleanup_temp_audio(const std::string & temp_path) {
+    if (!temp_path.empty()) {
+        std::remove(temp_path.c_str());
+    }
+}
+
 // command-line parameters
 struct whisper_params {
     int32_t n_threads     = std::min(4, (int32_t) std::thread::hardware_concurrency());
@@ -101,6 +177,9 @@ struct whisper_params {
     std::vector<std::string> fname_out = {};
 
     grammar_parser::parse_state grammar_parsed;
+
+    // Video input support (requires ffmpeg in PATH)
+    bool video_input = false;
 
     // Voice Activity Detection (VAD) parameters
     bool        vad           = false;
@@ -211,6 +290,8 @@ static bool whisper_params_parse(int argc, char ** argv, whisper_params & params
         else if (arg == "-vmsd" || arg == "--vad-max-speech-duration-s")   { params.vad_max_speech_duration_s   = std::stof(ARGV_NEXT); }
         else if (arg == "-vp"   || arg == "--vad-speech-pad-ms")           { params.vad_speech_pad_ms           = std::stoi(ARGV_NEXT); }
         else if (arg == "-vo"   || arg == "--vad-samples-overlap")         { params.vad_samples_overlap         = std::stof(ARGV_NEXT); }
+        // Video input support
+        else if (arg == "-vi"   || arg == "--video-input")                  { params.video_input                 = true; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             whisper_print_usage(argc, argv, params);
@@ -225,6 +306,7 @@ static void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params
     fprintf(stderr, "\n");
     fprintf(stderr, "usage: %s [options] file0 file1 ...\n", argv[0]);
     fprintf(stderr, "supported audio formats: flac, mp3, ogg, wav\n");
+    fprintf(stderr, "supported video formats (with -vi flag): mp4, mkv, avi, mov, webm, etc. (requires ffmpeg)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "options:\n");
     fprintf(stderr, "  -h,        --help                 [default] show this help message and exit\n");
@@ -295,6 +377,8 @@ static void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params
                                                                                                                                   std::to_string(params.vad_max_speech_duration_s).c_str());
     fprintf(stderr, "  -vp N,     --vad-speech-pad-ms           N [%-7d] VAD speech padding (extend segments)\n",             params.vad_speech_pad_ms);
     fprintf(stderr, "  -vo N,     --vad-samples-overlap         N [%-7.2f] VAD samples overlap (seconds between segments)\n", params.vad_samples_overlap);
+    fprintf(stderr, "\nVideo Input options:\n");
+    fprintf(stderr, "  -vi,       --video-input                   [%-7s] enable video input (extract audio using ffmpeg)\n", params.video_input ? "true" : "false");
     fprintf(stderr, "\n");
 }
 
@@ -1115,10 +1199,29 @@ int main(int argc, char ** argv) {
         std::vector<float> pcmf32;               // mono-channel F32 PCM
         std::vector<std::vector<float>> pcmf32s; // stereo-channel F32 PCM
 
-        if (!::read_audio_data(fname_inp, pcmf32, pcmf32s, params.diarize)) {
-            fprintf(stderr, "error: failed to read audio file '%s'\n", fname_inp.c_str());
+        // Video to audio conversion if needed
+        std::string audio_file_to_process = fname_inp;
+        std::string temp_audio_file = "";
+        
+        if (params.video_input && is_video_file(fname_inp)) {
+            temp_audio_file = convert_video_to_audio(fname_inp);
+            if (temp_audio_file.empty()) {
+                fprintf(stderr, "error: failed to convert video file '%s' to audio\n", fname_inp.c_str());
+                continue;
+            }
+            audio_file_to_process = temp_audio_file;
+        } else if (is_video_file(fname_inp) && !params.video_input) {
+            fprintf(stderr, "warning: '%s' appears to be a video file. Use -vi or --video-input flag to enable video processing.\n", fname_inp.c_str());
+        }
+
+        if (!::read_audio_data(audio_file_to_process, pcmf32, pcmf32s, params.diarize)) {
+            fprintf(stderr, "error: failed to read audio file '%s'\n", audio_file_to_process.c_str());
+            cleanup_temp_audio(temp_audio_file);
             continue;
         }
+
+        // Clean up temporary audio file after reading
+        cleanup_temp_audio(temp_audio_file);
 
         if (!whisper_is_multilingual(ctx)) {
             if (params.language != "en" || params.translate) {
