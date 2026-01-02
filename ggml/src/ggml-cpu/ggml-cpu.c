@@ -81,6 +81,11 @@ struct ggml_arm_arch_features_type {
 } ggml_arm_arch_features = { 0 };
 #endif
 
+#if defined(__riscv)
+struct ggml_riscv_arch_features_type {
+    int rvv_vlen;
+} ggml_riscv_arch_features = { 0 };
+#endif
 
 #if defined(_WIN32)
 
@@ -702,6 +707,15 @@ static void ggml_init_arm_arch_features(void) {
 static void ggml_init_arm_arch_features(void) {}
 #endif
 #endif // __ARM_ARCH
+
+#if defined(__riscv) && defined(__riscv_v_intrinsic)
+#include <riscv_vector.h>
+static void ggml_init_riscv_arch_features(void) {
+    ggml_riscv_arch_features.rvv_vlen = __riscv_vlenb();
+}
+#else
+static void ggml_init_riscv_arch_features(void) {}
+#endif
 
 struct ggml_tensor * ggml_new_i32(struct ggml_context * ctx, int32_t value) {
     GGML_ASSERT(!ggml_get_no_alloc(ctx));
@@ -3306,13 +3320,33 @@ void ggml_cpu_fp16_to_fp32(const ggml_fp16_t * x, float * y, int64_t n) {
         __m128 y_vec = _mm_cvtph_ps(x_vec);
         _mm_storeu_ps(y + i, y_vec);
     }
-#elif defined(__riscv_zvfh)
-    for (int vl; i < n; i += vl) {
-        vl = __riscv_vsetvl_e16m1(n - i);
-        vfloat16m1_t vx = __riscv_vle16_v_f16m1((_Float16 *)&x[i], vl);
-        vfloat32m2_t vy = __riscv_vfwcvt_f_f_v_f32m2(vx, vl);
-        __riscv_vse32_v_f32m2(&y[i], vy, vl);
+
+#elif defined(__riscv_v_intrinsic) && defined(__riscv_zvfhmin)
+    // calculate step size
+    const int epr = __riscv_vsetvlmax_e16m2();
+    const int step = epr * 2;
+    const int np = (n & ~(step - 1));
+
+    // unroll by 2
+    for (; i < np; i += step) {
+        vfloat16m2_t ax0 = __riscv_vle16_v_f16m2((const _Float16*)x + i, epr);
+        vfloat32m4_t ay0 = __riscv_vfwcvt_f_f_v_f32m4(ax0, epr);
+        __riscv_vse32_v_f32m4(y + i, ay0, epr);
+
+        vfloat16m2_t ax1 = __riscv_vle16_v_f16m2((const _Float16*)x + i + epr, epr);
+        vfloat32m4_t ay1 = __riscv_vfwcvt_f_f_v_f32m4(ax1, epr);
+        __riscv_vse32_v_f32m4(y + i + epr, ay1, epr);
     }
+
+    // leftovers
+    int vl;
+    for (i = np; i < n; i += vl) {
+        vl = __riscv_vsetvl_e16m2(n - i);
+        vfloat16m2_t ax0 = __riscv_vle16_v_f16m2((const _Float16*)x + i, vl);
+        vfloat32m4_t ay0 = __riscv_vfwcvt_f_f_v_f32m4(ax0, vl);
+        __riscv_vse32_v_f32m4(y + i, ay0, vl);
+    }
+
 #endif
 
     for (; i < n; ++i) {
@@ -3356,6 +3390,31 @@ void ggml_cpu_bf16_to_fp32(const ggml_bf16_t * x, float * y, int64_t n) {
                                     _mm_loadu_si128(
                                         (const __m128i *)(x + i))),
                                 16)));
+    }
+#elif defined(__riscv_v_intrinsic) && defined(__riscv_zvfbfmin)
+    // calculate step size
+    const int epr = __riscv_vsetvlmax_e16m2();
+    const int step = epr * 2;
+    const int np = (n & ~(step - 1));
+
+    // unroll by 2
+    for (; i < np; i += step) {
+        vbfloat16m2_t ax0 = __riscv_vle16_v_bf16m2((const __bf16*)x + i, epr);
+        vfloat32m4_t ay0 = __riscv_vfwcvtbf16_f_f_v_f32m4(ax0, epr);
+        __riscv_vse32_v_f32m4(y + i, ay0, epr);
+
+        vbfloat16m2_t ax1 = __riscv_vle16_v_bf16m2((const __bf16*)x + i + epr, epr);
+        vfloat32m4_t ay1 = __riscv_vfwcvtbf16_f_f_v_f32m4(ax1, epr);
+        __riscv_vse32_v_f32m4(y + i + epr, ay1, epr);
+    }
+
+    // leftovers
+    int vl;
+    for (i = np; i < n; i += vl) {
+        vl = __riscv_vsetvl_e16m2(n - i);
+        vbfloat16m2_t ax0 = __riscv_vle16_v_bf16m2((const __bf16*)x + i, vl);
+        vfloat32m4_t ay0 = __riscv_vfwcvtbf16_f_f_v_f32m4(ax0, vl);
+        __riscv_vse32_v_f32m4(y + i, ay0, vl);
     }
 #endif
     for (; i < n; i++) {
@@ -3454,6 +3513,14 @@ int ggml_cpu_has_arm_fma(void) {
 int ggml_cpu_has_riscv_v(void) {
 #if defined(__riscv_v_intrinsic)
     return 1;
+#else
+    return 0;
+#endif
+}
+
+int ggml_cpu_get_rvv_vlen(void) {
+#if defined(__riscv) && defined(__riscv_v_intrinsic)
+    return ggml_riscv_arch_features.rvv_vlen;
 #else
     return 0;
 #endif
@@ -3623,6 +3690,10 @@ void ggml_cpu_init(void) {
 
 #if defined(__ARM_ARCH)
         ggml_init_arm_arch_features();
+#endif
+
+#if defined(__riscv)
+        ggml_init_riscv_arch_features();
 #endif
 
         is_first_call = false;
