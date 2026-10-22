@@ -12,7 +12,7 @@ list(APPEND CMAKE_PREFIX_PATH  ${ROCM_PATH})
 list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}/lib64/cmake")
 
 if (NOT DEFINED CMAKE_HIP_FLAGS_DEBUG)
-    set(CMAKE_HIP_FLAGS_DEBUG "-g -O2")
+    set(CMAKE_HIP_FLAGS_DEBUG "-g -Xarch_device -O2 -Xarch_host -O0")
 endif()
 
 # CMake on Windows doesn't support the HIP language yet
@@ -47,6 +47,10 @@ find_package(hip     REQUIRED)
 find_package(hipblas REQUIRED)
 find_package(rocblas REQUIRED)
 
+if (GGML_HIP_RCCL)
+    find_package(rccl REQUIRED)
+endif()
+
 if (${hip_VERSION} VERSION_LESS 6.1)
     message(FATAL_ERROR "At least ROCM/HIP V6.1 is required")
 endif()
@@ -66,17 +70,8 @@ list(APPEND GGML_SOURCES_ROCM ${SRCS})
 file(GLOB   SRCS "../ggml-cuda/template-instances/mmf*.cu")
 list(APPEND GGML_SOURCES_ROCM ${SRCS})
 
-if (GGML_CUDA_FA_ALL_QUANTS)
-    file(GLOB   SRCS "../ggml-cuda/template-instances/fattn-vec*.cu")
-    list(APPEND GGML_SOURCES_ROCM ${SRCS})
-    add_compile_definitions(GGML_CUDA_FA_ALL_QUANTS)
-else()
-    list(APPEND GGML_SOURCES_ROCM
-        ../ggml-cuda/template-instances/fattn-vec-instance-f16-f16.cu
-        ../ggml-cuda/template-instances/fattn-vec-instance-q4_0-q4_0.cu
-        ../ggml-cuda/template-instances/fattn-vec-instance-q8_0-q8_0.cu
-        ../ggml-cuda/template-instances/fattn-vec-instance-bf16-bf16.cu)
-endif()
+ggml_cuda_fattn_vec_instances(${CMAKE_CURRENT_SOURCE_DIR}/../ggml-cuda SRCS)
+list(APPEND GGML_SOURCES_ROCM ${SRCS})
 
 ggml_add_backend_library(ggml-hip
                          ${GGML_HEADERS_ROCM}
@@ -110,12 +105,12 @@ if (GGML_HIP_NO_VMM)
     add_compile_definitions(GGML_HIP_NO_VMM)
 endif()
 
-if (GGML_HIP_ROCWMMA_FATTN)
-    add_compile_definitions(GGML_HIP_ROCWMMA_FATTN)
-endif()
-
 if (NOT GGML_HIP_MMQ_MFMA)
     add_compile_definitions(GGML_HIP_NO_MMQ_MFMA)
+endif()
+
+if (GGML_HIP_RCCL)
+    add_compile_definitions(GGML_USE_NCCL) # RCCL has the same interface as NCCL.
 endif()
 
 if (GGML_HIP_EXPORT_METRICS)
@@ -140,6 +135,10 @@ endif()
 
 if (GGML_STATIC)
     message(FATAL_ERROR "Static linking not supported for HIP/ROCm")
+endif()
+
+if (GGML_HIP_RCCL)
+    target_link_libraries(ggml-hip PRIVATE ggml-base roc::rccl)
 endif()
 
 target_link_libraries(ggml-hip PRIVATE ggml-base hip::host roc::rocblas roc::hipblas)
